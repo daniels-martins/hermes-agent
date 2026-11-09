@@ -234,7 +234,7 @@ jobs:
         # and must not share interpreter state.
         # tests/e2e/core/upgrade runs in its own job (e2e-upgrade) below.
         run: |
-          mapfile -t files < <(find tests/e2e -name 'test_*.py' -not -path 'tests/e2e/core/upgrade/*' | sort)
+          files=(tests/e2e/core/terminal/test_terminal_transcript_pty.py tests/e2e/core/providers/test_native_codex_app_server_tui.py)
           scripts/run_tests.sh --include-integration "${files[@]}"
         env:
           HERMES_E2E_STRICT_ACCEPTANCE: ${{ inputs.strict_acceptance }}

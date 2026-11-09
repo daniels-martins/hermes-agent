@@ -246,14 +246,40 @@ class PtyHermes:
         deadline = time.monotonic() + timeout
         while True:
             remaining = max(1.0, deadline - time.monotonic())
-            poll(lambda: self._dead() or self._raw_mode(), timeout=remaining,
-                 what="the UI to take the terminal (raw mode)")
+            try:
+                poll(lambda: self._dead() or self._raw_mode(), timeout=remaining,
+                     what="the UI to take the terminal (raw mode)")
+            except AssertionError as exc:
+                raise AssertionError(f"{exc}\n{self._diag()}") from None
             assert self.proc.poll() is None, f"hermes exited ({self.proc.returncode}) during startup\n{self.dump()}"
             self.wait_quiet(1.0, timeout=max(1.0, deadline - time.monotonic()))
             if self._raw_mode():
                 return
             if time.monotonic() >= deadline:
                 raise AssertionError(f"UI never settled in raw mode\n{self.dump()}")
+
+    def _diag(self) -> str:  # DEBUG lane tui-pty-raw-mode
+        out = ["=== DIAG screen ===", self.dump(), "=== DIAG raw tail ===",
+               repr(bytes(self.raw[-3000:]))]
+        try:
+            out += ["=== DIAG ps ===", subprocess.run(["ps", "-eo", "pid,ppid,sid,stat,etime,args", "--forest"],
+                    capture_output=True, text=True, timeout=10).stdout[-8000:]]
+        except Exception as e:
+            out.append(f"ps failed {e}")
+        for pid in session_members(self.sid):
+            out.append(f"--- member {pid}: {cmdline(pid)}")
+            try:
+                out.append("wchan=" + Path(f"/proc/{pid}/wchan").read_text())
+                env = Path(f"/proc/{pid}/environ").read_bytes().decode(errors="replace").split("\0")
+                out.append("env: " + " ".join(e for e in env if e.split("=")[0] in (
+                    "PATH", "HERMES_PYTHON", "HERMES_PYTHON_SRC_ROOT", "PYTHONPATH", "HERMES_NODE", "HERMES_HOME",
+                    "VIRTUAL_ENV", "HERMES_RUNTIME_DIR", "HERMES_TUI_DIR", "HERMES_CWD")))
+            except OSError as e:
+                out.append(f"proc read failed {e}")
+        for f in sorted(self.root.rglob("*")):
+            if f.is_file() and (f.suffix in (".log", ".txt", ".jsonl") or "log" in f.name) and f.stat().st_size < 2_000_000:
+                out += [f"=== DIAG file {f} ===", f.read_text(errors="replace")[-6000:]]
+        return "\n".join(out)
 
     def _dead(self) -> bool:
         return self.proc.poll() is not None
